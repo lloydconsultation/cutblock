@@ -25,10 +25,11 @@
     </style>
   </head>
   <body>
+    <div id="map"></div>
     <div class="controls">
       <button id="download">Download GeoJSON</button>
+      <button id="split-poly">Divide Polygon (K-means)</button>
     </div>
-    <div id="map"></div>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
     <script>
@@ -77,6 +78,33 @@
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+      };
+      // Divide polygon using backend
+      document.getElementById("split-poly").onclick = async function () {
+        var data = drawnItems.toGeoJSON();
+        if (!data.features.length) {
+          alert("Draw a polygon first!");
+          return;
+        }
+        // Only use the first polygon
+        var coords = data.features[0].geometry.coordinates[0];
+        // Send to backend
+        const response = await fetch("/split-polygon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ coords: coords, n_clusters: 2 }),
+        });
+        if (!response.ok) {
+          alert("Error from backend");
+          return;
+        }
+        const result = await response.json();
+        // Remove old layers
+        drawnItems.clearLayers();
+        // Add new polygons
+        result.polygons.forEach(function (poly) {
+          L.polygon(poly).addTo(drawnItems);
+        });
       };
     </script>
   </body>

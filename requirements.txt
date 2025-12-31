@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+folium
+shapely
+scikit-learn
+numpy
