@@ -38,8 +38,9 @@ def kmeans_split_polygon(polygon_coords, n_clusters=2, n_points=1000):
 		clipped = region.intersection(poly)
 		if clipped.is_empty:
 			continue
-		if clipped.type == 'Polygon':
+		if clipped.geom_type == 'Polygon':
 			result_polys.append(clipped)
-		elif clipped.type == 'MultiPolygon':
+		elif clipped.geom_type == 'MultiPolygon':
 			result_polys.extend(list(clipped.geoms))
 	return result_polys
+

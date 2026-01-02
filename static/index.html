@@ -9,6 +9,7 @@
       rel="stylesheet"
       href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"
     />
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <style>
       #map {
         height: 600px;
@@ -21,6 +22,10 @@
       }
       .controls {
         margin: 10px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
       }
     </style>
   </head>
@@ -28,6 +33,7 @@
     <div id="map"></div>
     <div class="controls">
       <button id="download">Download GeoJSON</button>
+      <input placeholder="How many parts?" id="division-number"></button>
       <button id="split-poly">Divide Polygon (K-means)</button>
     </div>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -62,6 +68,34 @@
       map.on(L.Draw.Event.CREATED, function (e) {
         var layer = e.layer;
         drawnItems.addLayer(layer);
+
+        // Assign a name to the polygon
+        if (!window.polygonNameCounter) window.polygonNameCounter = 1;
+        layer.feature = layer.feature || { properties: {} };
+        layer.feature.properties.name = 'Polygon ' + window.polygonNameCounter++;
+
+        // Add click event for selection and popup
+        layer.on("click", function () {
+          // Deselect all polygons
+          drawnItems.eachLayer(function (l) {
+            l.setStyle && l.setStyle({ color: "#3388ff", weight: 3 });
+            if (l.closePopup) l.closePopup();
+          });
+          // Highlight selected polygon
+          layer.setStyle({ color: "red", weight: 5 });
+          window.selectedPolygon = layer;
+          // Calculate area using turf.js
+          var geojson = layer.toGeoJSON();
+          var area = turf.area(geojson);
+          var name = geojson.properties && geojson.properties.name ? geojson.properties.name : 'Polygon';
+          var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(undefined, {maximumFractionDigits:2})} m²`;
+          if (layer.getPopup()) {
+            layer.setPopupContent(popupContent);
+            layer.openPopup();
+          } else {
+            layer.bindPopup(popupContent).openPopup();
+          }
+        });
       });
 
       // Download GeoJSON
@@ -81,29 +115,57 @@
       };
       // Divide polygon using backend
       document.getElementById("split-poly").onclick = async function () {
-        var data = drawnItems.toGeoJSON();
-        if (!data.features.length) {
-          alert("Draw a polygon first!");
-          return;
-        }
-        // Only use the first polygon
-        var coords = data.features[0].geometry.coordinates[0];
-        // Send to backend
-        const response = await fetch("/split-polygon", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ coords: coords, n_clusters: 2 }),
-        });
+          if (!window.selectedPolygon) {
+            alert("Please select a polygon to divide.");
+            return;
+          }
+          var selectedGeoJSON = window.selectedPolygon.toGeoJSON();
+          var coords = selectedGeoJSON.geometry.coordinates[0];
+          var nClusters = parseInt(document.getElementById('division-number').value);
+          if (isNaN(nClusters) || nClusters < 1) {
+            alert("Please enter a valid number of divisions.");
+            return;
+          }
+          // Send to backend
+          const response = await fetch("/split-polygon", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ coords: coords, n_clusters: nClusters }),
+          });
         if (!response.ok) {
           alert("Error from backend");
           return;
         }
         const result = await response.json();
-        // Remove old layers
-        drawnItems.clearLayers();
+        // Remove only the selected polygon
+        drawnItems.removeLayer(window.selectedPolygon);
+        window.selectedPolygon = null;
         // Add new polygons
         result.polygons.forEach(function (poly) {
-          L.polygon(poly).addTo(drawnItems);
+          var polygonLayer = L.polygon(poly).addTo(drawnItems);
+          // Assign a name to the new polygons
+          if (!window.polygonNameCounter) window.polygonNameCounter = 1;
+          polygonLayer.feature = polygonLayer.feature || { properties: {} };
+          polygonLayer.feature.properties.name = 'Polygon ' + window.polygonNameCounter++;
+          // Add click event for selection and popup
+          polygonLayer.on("click", function () {
+            drawnItems.eachLayer(function (l) {
+              l.setStyle && l.setStyle({ color: "#3388ff", weight: 3 });
+              if (l.closePopup) l.closePopup();
+            });
+            polygonLayer.setStyle({ color: "red", weight: 5 });
+            window.selectedPolygon = polygonLayer;
+            var geojson = polygonLayer.toGeoJSON();
+            var area = turf.area(geojson);
+            var name = geojson.properties && geojson.properties.name ? geojson.properties.name : 'Polygon';
+            var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(undefined, {maximumFractionDigits:2})} m²`;
+            if (polygonLayer.getPopup()) {
+              polygonLayer.setPopupContent(popupContent);
+              polygonLayer.openPopup();
+            } else {
+              polygonLayer.bindPopup(popupContent).openPopup();
+            }
+          });
         });
       };
     </script>
