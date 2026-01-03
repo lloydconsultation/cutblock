@@ -4,6 +4,3 @@ folium
 shapely
 scikit-learn
 numpy
-pdf2image
-pymupdf
-pillow

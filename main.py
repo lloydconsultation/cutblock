@@ -2,7 +2,11 @@ from fastapi import FastAPI, Response, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from map_functionality import initialize_map
-from geom_manipulation import kmeans_split_polygon
+from geom_manipulation import (
+    kmeans_split_polygon,
+    vertical_split_polygon,
+    horizontal_split_polygon,
+)
 import uvicorn
 
 # Import PDF overlay FastAPI app and mount its routes
@@ -32,11 +36,18 @@ async def split_polygon(request: Request):
     data = await request.json()
     coords = data.get("coords")
     n_clusters = data.get("n_clusters", 2)
+    mode = (data.get("mode") or "kmeans").lower()
     if not coords or len(coords) < 3:
         return JSONResponse({"error": "Invalid coordinates"}, status_code=400)
     # Convert to (x, y) tuples
     poly_coords = [(float(x), float(y)) for x, y in coords]
-    polys = kmeans_split_polygon(poly_coords, n_clusters=n_clusters)
+
+    if mode == "vertical":
+        polys = vertical_split_polygon(poly_coords, n_parts=int(n_clusters))
+    elif mode == "horizontal":
+        polys = horizontal_split_polygon(poly_coords, n_parts=int(n_clusters))
+    else:
+        polys = kmeans_split_polygon(poly_coords, n_clusters=n_clusters)
     # Return as list of lists of [lat, lng]
     result = []
     for poly in polys:

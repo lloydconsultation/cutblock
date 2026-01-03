@@ -60,10 +60,4 @@ fastapi dev main.py
 
 ## Notes
 
-- The .venv directory is ignored by git (see .gitignore).
-- All static files are in the `static/` directory.
-- Backend polygon splitting is handled by the `/split-polygon` endpoint.
-
----
-
-Feel free to customize and extend the app!
+- The .venv directory
