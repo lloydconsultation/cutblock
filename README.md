@@ -1,3 +1,7 @@
+## TODO
+
+- [ ] Fix the 'Revert Division' button so that it reliably restores the previous polygon state after a division. Currently, this feature is broken and does not  restore polygons but deletes all polys
+
 # CutBlock
 
 A web app for drawing polygons on a map, dividing them using k-means clustering, and downloading the results as GeoJSON.

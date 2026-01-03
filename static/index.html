@@ -31,49 +31,123 @@
   </head>
   <body>
     <div id="map"></div>
-    <div class="controls">
-      <button id="download">Download GeoJSON</button>
-      <input placeholder="How many parts?" id="division-number" />
-      <button id="split-poly">Divide Polygon (K-means)</button>
-      <button id="toggle-pdf" type="button" style="display: none">
-        Toggle PDF Overlay
-      </button>
-      <label
-        id="opacity-label"
-        style="display: none; align-items: center; gap: 4px"
-      >
-        PDF Opacity
+    <div class="controls" style="flex-wrap: wrap; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 8px">
+        <button id="download" style="min-width: 120px">Download GeoJSON</button>
         <input
-          type="range"
-          id="pdf-opacity"
-          min="0"
-          max="1"
-          step="0.01"
-          value="1"
-          style="vertical-align: middle"
+          placeholder="How many parts?"
+          id="division-number"
+          style="width: 120px; padding: 4px 8px"
         />
-      </label>
+        <button id="split-poly" style="min-width: 170px">
+          Divide Polygon (K-means)
+        </button>
+        <button
+          id="revert-poly"
+          style="
+            min-width: 120px;
+            background: #eee;
+            color: #333;
+            border: 1px solid #bbb;
+          "
+        >
+          Revert Division
+        </button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px">
+        <button
+          id="toggle-pdf"
+          type="button"
+          style="display: none; min-width: 130px"
+        >
+          Toggle PDF Overlay
+        </button>
+        <label
+          id="opacity-label"
+          style="display: none; align-items: center; gap: 4px; margin-bottom: 0"
+        >
+          PDF Opacity
+          <input
+            type="range"
+            id="pdf-opacity"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+            style="vertical-align: middle; width: 80px"
+          />
+        </label>
+      </div>
       <div
         id="pdf-controls"
-        style="display: none; align-items: center; gap: 5px"
+        style="
+          display: none;
+          align-items: center;
+          gap: 6px;
+          background: #f7f7f7;
+          border-radius: 6px;
+          padding: 4px 10px;
+        "
       >
-        <span>Move:</span>
-        <button type="button" id="nudge-up">▲</button>
-        <button type="button" id="nudge-down">▼</button>
-        <button type="button" id="nudge-left">◀</button>
-        <button type="button" id="nudge-right">▶</button>
-        <span>Scale:</span>
-        <button type="button" id="scale-up">＋</button>
-        <button type="button" id="scale-down">－</button>
+        <span style="font-size: 13px; color: #444">Move:</span>
+        <button type="button" id="nudge-up" style="width: 28px; height: 28px">
+          ▲
+        </button>
+        <button type="button" id="nudge-down" style="width: 28px; height: 28px">
+          ▼
+        </button>
+        <button type="button" id="nudge-left" style="width: 28px; height: 28px">
+          ◀
+        </button>
+        <button
+          type="button"
+          id="nudge-right"
+          style="width: 28px; height: 28px"
+        >
+          ▶
+        </button>
+        <span style="font-size: 13px; color: #444; margin-left: 8px"
+          >Scale:</span
+        >
+        <button type="button" id="scale-up" style="width: 28px; height: 28px">
+          ＋
+        </button>
+        <button type="button" id="scale-down" style="width: 28px; height: 28px">
+          －
+        </button>
       </div>
       <form
         id="pdf-upload-form"
-        style="display: inline-flex; align-items: center; gap: 5px"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: #f7f7f7;
+          border-radius: 6px;
+          padding: 4px 10px;
+        "
       >
-        <input type="file" id="pdf-file" accept="application/pdf" />
-        <input type="text" id="sw-coord" placeholder="SW lat,lng" size="12" />
-        <input type="text" id="ne-coord" placeholder="NE lat,lng" size="12" />
-        <button type="submit">Upload PDF Map</button>
+        <input
+          type="file"
+          id="pdf-file"
+          accept="application/pdf"
+          style="width: 140px"
+        />
+        <input
+          type="text"
+          id="sw-coord"
+          placeholder="SW lat,lng"
+          size="12"
+          style="width: 110px; padding: 4px 6px"
+        />
+        <input
+          type="text"
+          id="ne-coord"
+          placeholder="NE lat,lng"
+          size="12"
+          style="width: 110px; padding: 4px 6px"
+        />
+        <button type="submit" style="min-width: 120px">Upload PDF Map</button>
       </form>
     </div>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -400,6 +474,139 @@
         URL.revokeObjectURL(url);
       };
       // Divide polygon using backend
+      // --- Polygon division history for undo ---
+      if (!window.polygonHistory) window.polygonHistory = [];
+
+      function bindPolygonInteractions(layer) {
+        layer.on("click", function () {
+          drawnItems.eachLayer(function (l) {
+            l.setStyle && l.setStyle({ color: "#3388ff", weight: 3 });
+            if (l.closePopup) l.closePopup();
+          });
+          layer.setStyle && layer.setStyle({ color: "red", weight: 5 });
+          window.selectedPolygon = layer;
+          var geojson = layer.toGeoJSON();
+          var area = null;
+          try {
+            if (
+              geojson &&
+              geojson.geometry &&
+              (geojson.geometry.type === "Polygon" ||
+                geojson.geometry.type === "MultiPolygon")
+            ) {
+              area = turf.area(geojson);
+            }
+          } catch (e) {
+            area = null;
+          }
+          var name =
+            geojson.properties && geojson.properties.name
+              ? geojson.properties.name
+              : "Polygon";
+          var areaText =
+            area === null
+              ? "N/A"
+              : area.toLocaleString(undefined, { maximumFractionDigits: 2 });
+          var popupContent = `<b>${name}</b><br>Area: ${areaText} m²`;
+          if (layer.getPopup && layer.getPopup()) {
+            layer.setPopupContent(popupContent);
+            layer.openPopup();
+          } else if (layer.bindPopup) {
+            layer.bindPopup(popupContent).openPopup();
+          }
+        });
+      }
+
+      // Snapshot/restore polygons using Leaflet lat/lngs (more reliable than GeoJSON here)
+      function normalizeLatLngs(latlngs) {
+        if (!Array.isArray(latlngs)) {
+          if (
+            latlngs &&
+            typeof latlngs.lat === "number" &&
+            typeof latlngs.lng === "number"
+          ) {
+            return [latlngs.lat, latlngs.lng];
+          }
+          return latlngs;
+        }
+        return latlngs.map(normalizeLatLngs);
+      }
+
+      function snapshotDrawnItems() {
+        var snapshot = [];
+        drawnItems.eachLayer(function (layer) {
+          if (!layer || !layer.getLatLngs) return;
+          var latlngs = normalizeLatLngs(layer.getLatLngs());
+          var props =
+            layer.feature && layer.feature.properties
+              ? JSON.parse(JSON.stringify(layer.feature.properties))
+              : {};
+          snapshot.push({ latlngs: latlngs, properties: props });
+        });
+        return snapshot;
+      }
+
+      function restoreFromSnapshot(snapshot) {
+        var restoredLayers = [];
+        var maxPolyNum = 0;
+        (snapshot || []).forEach(function (item) {
+          if (!item || !item.latlngs) return;
+          var layer = L.polygon(item.latlngs);
+          layer.feature = {
+            type: "Feature",
+            properties: item.properties || {},
+          };
+          restoredLayers.push(layer);
+
+          if (layer.feature.properties && layer.feature.properties.name) {
+            var match = layer.feature.properties.name.match(/Polygon (\d+)/);
+            if (match) {
+              var num = parseInt(match[1]);
+              if (num > maxPolyNum) maxPolyNum = num;
+            }
+          }
+        });
+        return { layers: restoredLayers, maxPolyNum: maxPolyNum };
+      }
+
+      document.getElementById("revert-poly").onclick = function () {
+        if (!window.polygonHistory || window.polygonHistory.length === 0) {
+          alert("No previous state to revert to.");
+          return;
+        }
+
+        // Peek at previous state first (don't mutate history unless restore succeeds)
+        var snapshot = window.polygonHistory[window.polygonHistory.length - 1];
+        if (!snapshot || !Array.isArray(snapshot) || snapshot.length === 0) {
+          alert("No polygons to restore.");
+          return;
+        }
+
+        try {
+          var restored = restoreFromSnapshot(snapshot);
+          if (!restored.layers.length) {
+            alert("No polygons to restore.");
+            return;
+          }
+
+          // Swap layers: clear AFTER successful reconstruction.
+          drawnItems.clearLayers();
+          restored.layers.forEach(function (layer) {
+            drawnItems.addLayer(layer);
+            bindPolygonInteractions(layer);
+          });
+
+          // Consume history only after restore succeeded.
+          window.polygonHistory.pop();
+          window.selectedPolygon = null;
+          window.polygonNameCounter = Math.max(restored.maxPolyNum + 1, 1);
+        } catch (err) {
+          console.error("Revert failed:", err);
+          alert("Revert failed. See console for details.");
+          return;
+        }
+      };
+
       document.getElementById("split-poly").onclick = async function () {
         if (!window.selectedPolygon) {
           alert("Please select a polygon to divide.");
@@ -414,16 +621,51 @@
           alert("Please enter a valid number of divisions.");
           return;
         }
-        // Send to backend
-        const response = await fetch("/split-polygon", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ coords: coords, n_clusters: nClusters }),
-        });
+        // Save current state for undo
+        var snapshot = snapshotDrawnItems();
+        if ((!snapshot || snapshot.length === 0) && window.selectedPolygon) {
+          // Fallback: snapshot just the selected polygon
+          snapshot = [
+            {
+              latlngs: normalizeLatLngs(window.selectedPolygon.getLatLngs()),
+              properties:
+                window.selectedPolygon.feature &&
+                window.selectedPolygon.feature.properties
+                  ? JSON.parse(
+                      JSON.stringify(window.selectedPolygon.feature.properties)
+                    )
+                  : {},
+            },
+          ];
+        }
+        if (!snapshot || snapshot.length === 0) {
+          alert("Nothing to snapshot for revert.");
+          return;
+        }
+        window.polygonHistory.push(snapshot);
+
+        let response;
+        try {
+          // Send to backend
+          response = await fetch("/split-polygon", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ coords: coords, n_clusters: nClusters }),
+          });
+        } catch (err) {
+          // Roll back history push if the split didn't happen
+          window.polygonHistory.pop();
+          alert("Network error calling split endpoint");
+          return;
+        }
+
         if (!response.ok) {
+          // Roll back history push if the split didn't happen
+          window.polygonHistory.pop();
           alert("Error from backend");
           return;
         }
+
         const result = await response.json();
         // Remove only the selected polygon
         drawnItems.removeLayer(window.selectedPolygon);
