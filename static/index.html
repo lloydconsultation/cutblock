@@ -9,10 +9,10 @@
       rel="stylesheet"
       href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"
     />
-    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+    <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
     <style>
       #map {
-        height: 600px;
+        height: 85vh;
         width: 100%;
       }
       body {
@@ -422,40 +422,14 @@
         var layer = e.layer;
         drawnItems.addLayer(layer);
 
-        // Assign a name to the polygon
+        // Assign a top-level name to the polygon
         if (!window.polygonNameCounter) window.polygonNameCounter = 1;
-        layer.feature = layer.feature || { properties: {} };
+        layer.feature = layer.feature || { type: "Feature", properties: {} };
         layer.feature.properties.name =
           "Polygon " + window.polygonNameCounter++;
 
         // Add click event for selection and popup
-        layer.on("click", function () {
-          // Deselect all polygons
-          drawnItems.eachLayer(function (l) {
-            l.setStyle && l.setStyle({ color: "#3388ff", weight: 3 });
-            if (l.closePopup) l.closePopup();
-          });
-          // Highlight selected polygon
-          layer.setStyle({ color: "red", weight: 5 });
-          window.selectedPolygon = layer;
-          // Calculate area using turf.js
-          var geojson = layer.toGeoJSON();
-          var area = turf.area(geojson);
-          var name =
-            geojson.properties && geojson.properties.name
-              ? geojson.properties.name
-              : "Polygon";
-          var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(
-            undefined,
-            { maximumFractionDigits: 2 }
-          )} m²`;
-          if (layer.getPopup()) {
-            layer.setPopupContent(popupContent);
-            layer.openPopup();
-          } else {
-            layer.bindPopup(popupContent).openPopup();
-          }
-        });
+        bindPolygonInteractions(layer);
       });
 
       // Download GeoJSON
@@ -476,6 +450,22 @@
       // Divide polygon using backend
       // --- Polygon division history for undo ---
       if (!window.polygonHistory) window.polygonHistory = [];
+
+      function getPolygonPathFromName(name) {
+        if (!name || typeof name !== "string") return null;
+        var trimmed = name.trim();
+        var match = trimmed.match(/^Polygon\s+(.+)$/i);
+        return (match ? match[1] : trimmed).trim() || null;
+      }
+
+      function makeChildPolygonName(parentName, index) {
+        var parentPath = getPolygonPathFromName(parentName);
+        if (!parentPath) parentPath = "";
+        if (parentPath.length > 0) {
+          return "Polygon " + parentPath + "." + index;
+        }
+        return "Polygon " + index;
+      }
 
       function bindPolygonInteractions(layer) {
         layer.on("click", function () {
@@ -613,6 +603,14 @@
           return;
         }
         var selectedGeoJSON = window.selectedPolygon.toGeoJSON();
+        var parentName =
+          (selectedGeoJSON && selectedGeoJSON.properties
+            ? selectedGeoJSON.properties.name
+            : null) ||
+          (window.selectedPolygon.feature &&
+          window.selectedPolygon.feature.properties
+            ? window.selectedPolygon.feature.properties.name
+            : null);
         var coords = selectedGeoJSON.geometry.coordinates[0];
         var nClusters = parseInt(
           document.getElementById("division-number").value
@@ -671,38 +669,18 @@
         drawnItems.removeLayer(window.selectedPolygon);
         window.selectedPolygon = null;
         // Add new polygons
-        result.polygons.forEach(function (poly) {
+        result.polygons.forEach(function (poly, idx) {
           var polygonLayer = L.polygon(poly).addTo(drawnItems);
-          // Assign a name to the new polygons
-          if (!window.polygonNameCounter) window.polygonNameCounter = 1;
-          polygonLayer.feature = polygonLayer.feature || { properties: {} };
-          polygonLayer.feature.properties.name =
-            "Polygon " + window.polygonNameCounter++;
-          // Add click event for selection and popup
-          polygonLayer.on("click", function () {
-            drawnItems.eachLayer(function (l) {
-              l.setStyle && l.setStyle({ color: "#3388ff", weight: 3 });
-              if (l.closePopup) l.closePopup();
-            });
-            polygonLayer.setStyle({ color: "red", weight: 5 });
-            window.selectedPolygon = polygonLayer;
-            var geojson = polygonLayer.toGeoJSON();
-            var area = turf.area(geojson);
-            var name =
-              geojson.properties && geojson.properties.name
-                ? geojson.properties.name
-                : "Polygon";
-            var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(
-              undefined,
-              { maximumFractionDigits: 2 }
-            )} m²`;
-            if (polygonLayer.getPopup()) {
-              polygonLayer.setPopupContent(popupContent);
-              polygonLayer.openPopup();
-            } else {
-              polygonLayer.bindPopup(popupContent).openPopup();
-            }
-          });
+          // Assign hierarchical names based on the selected polygon
+          polygonLayer.feature = {
+            type: "Feature",
+            properties: {
+              name: makeChildPolygonName(parentName, idx + 1),
+            },
+          };
+
+          // Use the shared handler so popups/area behave consistently
+          bindPolygonInteractions(polygonLayer);
         });
       };
     </script>
