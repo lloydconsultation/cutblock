@@ -6,6 +6,7 @@ from geom_manipulation import (
     kmeans_split_polygon,
     vertical_split_polygon,
     horizontal_split_polygon,
+    radial_split_polygon,
 )
 import uvicorn
 
@@ -46,6 +47,8 @@ async def split_polygon(request: Request):
         polys = vertical_split_polygon(poly_coords, n_parts=int(n_clusters))
     elif mode == "horizontal":
         polys = horizontal_split_polygon(poly_coords, n_parts=int(n_clusters))
+    elif mode == "radial":
+        polys = radial_split_polygon(poly_coords, n_parts=int(n_clusters), area_tolerance=0.05)
     else:
         polys = kmeans_split_polygon(poly_coords, n_clusters=n_clusters)
     # Return as list of lists of [lat, lng]

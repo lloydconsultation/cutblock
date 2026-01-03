@@ -129,6 +129,97 @@
     var opacityLabel = byId("opacity-label");
     var pdfControls = byId("pdf-controls");
 
+    var inspectBtn = byId("inspect-pdf");
+    if (inspectBtn) {
+      inspectBtn.onclick = async function () {
+        var fileInput = byId("pdf-file");
+        var swInput = byId("sw-coord");
+        var neInput = byId("ne-coord");
+        if (!fileInput || !fileInput.files || !fileInput.files.length) {
+          alert("Please select a PDF first.");
+          return;
+        }
+        var formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+        var resp = await fetch("/inspect-pdf-map", {
+          method: "POST",
+          body: formData,
+        });
+        var data;
+        try {
+          data = await resp.json();
+        } catch (e) {
+          alert("Metadata check failed.");
+          return;
+        }
+
+        if (!resp.ok || (data && data.error)) {
+          alert((data && data.error) || "Metadata check failed");
+          return;
+        }
+
+        var has = !!data.has_geospatial_metadata;
+        var bounds = data.bounds_wgs84;
+        var gdal = data.gdal || {};
+        var measure = data.pdf_measure || {};
+
+        // If we have bounds, auto-fill the manual SW/NE fields so the user can
+        // upload/place immediately (and it also helps as a fallback).
+        var hasBounds = bounds && bounds.length === 4;
+        if (hasBounds && swInput && neInput) {
+          swInput.value = bounds[0].toFixed(6) + "," + bounds[1].toFixed(6);
+          neInput.value = bounds[2].toFixed(6) + "," + bounds[3].toFixed(6);
+        }
+
+        var lines = [];
+        lines.push("Geo metadata: " + (has ? "FOUND" : "NOT FOUND"));
+        if (bounds && bounds.length === 4) {
+          lines.push(
+            "Bounds (WGS84): SW " +
+              bounds[0].toFixed(6) +
+              "," +
+              bounds[1].toFixed(6) +
+              " | NE " +
+              bounds[2].toFixed(6) +
+              "," +
+              bounds[3].toFixed(6)
+          );
+        }
+        lines.push(
+          "GDAL available: " +
+            (gdal.available ? "yes" : "no") +
+            " | has georef: " +
+            (gdal.has_georef ? "yes" : "no") +
+            " | GCPs: " +
+            (gdal.gcp_count || 0)
+        );
+        lines.push(
+          "PDF /Measure GPTS: " + (measure.has_measure ? "yes" : "no")
+        );
+        if (!has) {
+          lines.push(
+            "If this is not a GeoPDF, use Center lat,lng + Scale/Move to fit, or provide SW/NE."
+          );
+        }
+
+        // Offer a one-click path: if bounds exist, we can immediately upload and
+        // place the overlay using the existing upload handler.
+        if (hasBounds) {
+          var doPlace = confirm(
+            lines.join("\n") +
+              "\n\nBounds were detected and SW/NE were filled.\nUpload + place the overlay now?"
+          );
+          if (doPlace) {
+            // Trigger the existing form submit handler.
+            pdfForm.requestSubmit();
+            return;
+          }
+        }
+
+        alert(lines.join("\n"));
+      };
+    }
+
     var nudgeStep = 0.0001;
     var scaleStep = 0.01;
 
@@ -230,6 +321,7 @@
       var fileInput = byId("pdf-file");
       var swInput = byId("sw-coord");
       var neInput = byId("ne-coord");
+      var centerInput = byId("center-coord");
 
       if (!fileInput.files.length) {
         alert("Please select a PDF.");
@@ -262,34 +354,87 @@
         data.error &&
         data.error.includes("No geospatial info")
       ) {
-        var sw = swInput.value.split(",").map(Number);
-        var ne = neInput.value.split(",").map(Number);
-        if (
-          sw.length !== 2 ||
-          ne.length !== 2 ||
-          sw.some(isNaN) ||
-          ne.some(isNaN)
-        ) {
-          alert(
-            "No geospatial info found in PDF. Please enter SW and NE coordinates as lat,lng."
-          );
-          return;
+        function parseLatLng(text) {
+          if (!text || typeof text !== "string") return null;
+          var parts = text.split(",").map(function (s) {
+            return Number(String(s).trim());
+          });
+          if (parts.length !== 2 || parts.some(isNaN)) return null;
+          return { lat: parts[0], lng: parts[1] };
         }
+
+        var swParsed = parseLatLng(swInput.value);
+        var neParsed = parseLatLng(neInput.value);
+        var centerParsed = parseLatLng(centerInput ? centerInput.value : "");
 
         if (state.pdfOverlay) state.map.removeLayer(state.pdfOverlay);
 
         var imgPath = fileInput.files[0].name + ".png";
         var imageUrl = "/static/pdf_uploads/" + imgPath;
-        var manualBounds = [sw, ne];
 
-        state.pdfOverlay = L.imageOverlay(imageUrl, manualBounds, {
-          opacity: parseFloat(opacitySlider.value),
-        }).addTo(state.map);
+        // Option 1: SW/NE bounds
+        if (swParsed && neParsed) {
+          var manualBounds = [
+            [swParsed.lat, swParsed.lng],
+            [neParsed.lat, neParsed.lng],
+          ];
 
-        state.map.fitBounds(manualBounds);
-        toggleBtn.style.display = "inline-block";
-        toggleBtn.textContent = "Hide PDF Overlay";
-        opacityLabel.style.display = "inline-flex";
+          state.pdfOverlay = L.imageOverlay(imageUrl, manualBounds, {
+            opacity: parseFloat(opacitySlider.value),
+          }).addTo(state.map);
+
+          state.map.fitBounds(manualBounds);
+          toggleBtn.style.display = "inline-block";
+          toggleBtn.textContent = "Hide PDF Overlay";
+          opacityLabel.style.display = "inline-flex";
+          pdfControls.style.display = "inline-flex";
+          return;
+        }
+
+        // Option 2: center + adjust size with scale controls
+        if (centerParsed) {
+          function getImageSize(url) {
+            return new Promise(function (resolve) {
+              var img = new Image();
+              img.onload = function () {
+                resolve({ width: img.width, height: img.height });
+              };
+              img.onerror = function () {
+                resolve(null);
+              };
+              img.src = url;
+            });
+          }
+
+          var size = await getImageSize(imageUrl);
+          var ratio = size && size.height ? size.width / size.height : 1;
+          var b = state.map.getBounds();
+          var latSpan = Math.abs(b.getNorth() - b.getSouth());
+          if (!isFinite(latSpan) || latSpan <= 0) latSpan = 0.02;
+          var latHalf = latSpan / 4;
+          if (!isFinite(latHalf) || latHalf <= 0) latHalf = 0.01;
+          var lngHalf = latHalf * ratio;
+
+          var centerBounds = [
+            [centerParsed.lat - latHalf, centerParsed.lng - lngHalf],
+            [centerParsed.lat + latHalf, centerParsed.lng + lngHalf],
+          ];
+
+          state.pdfOverlay = L.imageOverlay(imageUrl, centerBounds, {
+            opacity: parseFloat(opacitySlider.value),
+          }).addTo(state.map);
+
+          state.map.fitBounds(centerBounds);
+          toggleBtn.style.display = "inline-block";
+          toggleBtn.textContent = "Hide PDF Overlay";
+          opacityLabel.style.display = "inline-flex";
+          pdfControls.style.display = "inline-flex";
+          return;
+        }
+
+        alert(
+          "No geospatial info found in PDF. Enter either SW & NE (lat,lng) OR Center (lat,lng), then use Scale to fit."
+        );
         return;
       }
 

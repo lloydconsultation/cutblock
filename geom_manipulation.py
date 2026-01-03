@@ -4,6 +4,122 @@ from shapely.ops import voronoi_diagram, unary_union
 from sklearn.cluster import KMeans
 
 
+def _sector_polygon(cx, cy, r, start_angle, end_angle, max_segment_angle=np.pi / 48):
+	"""Create a (finite) circular sector polygon centered at (cx, cy).
+
+	The sector includes the arc from start_angle to end_angle. Use r large enough to
+	fully cover the polygon being clipped.
+	"""
+	start = float(start_angle)
+	end = float(end_angle)
+	if end < start:
+		end += 2.0 * np.pi
+	delta = end - start
+	if delta <= 0:
+		# Degenerate
+		return Polygon([(cx, cy), (cx + r, cy), (cx + r, cy), (cx, cy)])
+	steps = max(2, int(np.ceil(delta / float(max_segment_angle))))
+	angles = np.linspace(start, end, steps + 1)
+	arc_pts = [(cx + r * np.cos(a), cy + r * np.sin(a)) for a in angles]
+	return Polygon([(cx, cy)] + arc_pts + [(cx, cy)])
+
+
+def _polygon_cover_radius(poly, center_pt):
+	minx, miny, maxx, maxy = poly.bounds
+	cx, cy = center_pt.x, center_pt.y
+	corners = [(minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)]
+	d = 0.0
+	for x, y in corners:
+		d = max(d, float(np.hypot(x - cx, y - cy)))
+	# Multiply to be safe so the sector fully covers the polygon
+	return d * 2.5 + 1e-6
+
+
+def _slice_area(poly, center_pt, start_angle, end_angle, r):
+	sector = _sector_polygon(center_pt.x, center_pt.y, r, start_angle, end_angle)
+	clipped = poly.intersection(sector)
+	return clipped.area
+
+
+def radial_split_polygon(polygon_coords, n_parts, area_tolerance=0.05):
+	"""Split a polygon into n_parts radial 'pizza slices' of (near) equal area.
+
+	This chooses a center point inside the polygon and finds slice boundary angles
+	so each slice has approximately total_area / n_parts.
+	"""
+	poly = Polygon(polygon_coords).buffer(0)
+	if poly.is_empty:
+		return []
+	if n_parts <= 1:
+		return [poly]
+
+	# Ensure center is inside polygon
+	center = poly.representative_point()
+	r = _polygon_cover_radius(poly, center)
+
+	total_area = poly.area
+	if total_area <= 0:
+		return [poly]
+
+	target = total_area / float(n_parts)
+	angles = [0.0]
+
+	# Find angles incrementally so each slice hits the target area
+	start = 0.0
+	for i in range(1, int(n_parts)):
+		# Remaining slices
+		remaining_slices = int(n_parts) - (i - 1)
+		remaining_area = total_area - (i - 1) * target
+		# Clamp the target in case of tiny numerical drift
+		this_target = min(target, remaining_area - (remaining_slices - 1) * 0.0)
+
+		lo = start
+		hi = start + 2.0 * np.pi
+		# Binary search for boundary angle
+		best = None
+		best_err = float("inf")
+		for _ in range(50):
+			mid = (lo + hi) / 2.0
+			a = _slice_area(poly, center, start, mid, r)
+			err = abs(a - this_target)
+			if err < best_err:
+				best_err = err
+				best = mid
+			if a < this_target:
+				lo = mid
+			else:
+				hi = mid
+			# Early exit if close enough
+			if this_target > 0 and err / this_target <= (area_tolerance / 4.0):
+				break
+			if hi - lo < 1e-8:
+				break
+
+		if best is None:
+			break
+		start = best
+		angles.append(start)
+
+	angles.append(2.0 * np.pi)
+
+	# Build slice polygons
+	parts = []
+	for a0, a1 in zip(angles[:-1], angles[1:]):
+		sector = _sector_polygon(center.x, center.y, r, a0, a1)
+		clipped = poly.intersection(sector).buffer(0)
+		if clipped.is_empty:
+			continue
+		if clipped.geom_type == "Polygon":
+			parts.append(clipped)
+		elif clipped.geom_type == "MultiPolygon":
+			largest = _largest_polygon(clipped)
+			if largest is not None and not largest.is_empty:
+				parts.append(largest)
+
+	# Best effort to return exactly n_parts
+	return parts[: int(n_parts)]
+
+
 def _largest_polygon(geom):
 	if geom is None or geom.is_empty:
 		return None

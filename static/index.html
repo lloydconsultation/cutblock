@@ -26,6 +26,7 @@
           <option value="kmeans" selected>K-means</option>
           <option value="vertical">Vertical</option>
           <option value="horizontal">Horizontal</option>
+          <option value="radial">Radial</option>
         </select>
         <button id="split-poly" style="min-width: 150px">Divide Polygon</button>
         <button
@@ -122,17 +123,27 @@
         <input
           type="text"
           id="sw-coord"
-          placeholder="SW lat,lng"
+          placeholder="SW lat,lng (optional)"
           size="12"
           style="width: 110px; padding: 4px 6px"
         />
         <input
           type="text"
           id="ne-coord"
-          placeholder="NE lat,lng"
+          placeholder="NE lat,lng (optional)"
           size="12"
           style="width: 110px; padding: 4px 6px"
         />
+        <input
+          type="text"
+          id="center-coord"
+          placeholder="Center lat,lng"
+          size="12"
+          style="width: 120px; padding: 4px 6px"
+        />
+        <button type="button" id="inspect-pdf" style="min-width: 120px">
+          Check Metadata
+        </button>
         <button type="submit" style="min-width: 120px">Upload PDF Map</button>
       </form>
     </div>
