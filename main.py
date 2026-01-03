@@ -5,25 +5,21 @@ from map_functionality import initialize_map
 from geom_manipulation import kmeans_split_polygon
 import uvicorn
 
-from fastapi import FastAPI, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from map_functionality import initialize_map
-
+# Import PDF overlay FastAPI app and mount its routes
+from pdf_map_overlay import app as pdf_app
 
 app = FastAPI()
 
 # Serve static files (index.html)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-
-# Serve static files (index.html)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount PDF upload endpoint
+for route in pdf_app.routes:
+    app.router.routes.append(route)
 
 @app.get("/")
 def root():
     return FileResponse("static/index.html")
-
 
 @app.get("/map", response_class=Response)
 def show_map():

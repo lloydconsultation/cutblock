@@ -33,18 +33,297 @@
     <div id="map"></div>
     <div class="controls">
       <button id="download">Download GeoJSON</button>
-      <input placeholder="How many parts?" id="division-number"></button>
+      <input placeholder="How many parts?" id="division-number" />
       <button id="split-poly">Divide Polygon (K-means)</button>
+      <button id="toggle-pdf" type="button" style="display: none">
+        Toggle PDF Overlay
+      </button>
+      <label
+        id="opacity-label"
+        style="display: none; align-items: center; gap: 4px"
+      >
+        PDF Opacity
+        <input
+          type="range"
+          id="pdf-opacity"
+          min="0"
+          max="1"
+          step="0.01"
+          value="1"
+          style="vertical-align: middle"
+        />
+      </label>
+      <div
+        id="pdf-controls"
+        style="display: none; align-items: center; gap: 5px"
+      >
+        <span>Move:</span>
+        <button type="button" id="nudge-up">▲</button>
+        <button type="button" id="nudge-down">▼</button>
+        <button type="button" id="nudge-left">◀</button>
+        <button type="button" id="nudge-right">▶</button>
+        <span>Scale:</span>
+        <button type="button" id="scale-up">＋</button>
+        <button type="button" id="scale-down">－</button>
+      </div>
+      <form
+        id="pdf-upload-form"
+        style="display: inline-flex; align-items: center; gap: 5px"
+      >
+        <input type="file" id="pdf-file" accept="application/pdf" />
+        <input type="text" id="sw-coord" placeholder="SW lat,lng" size="12" />
+        <input type="text" id="ne-coord" placeholder="NE lat,lng" size="12" />
+        <button type="submit">Upload PDF Map</button>
+      </form>
     </div>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
     <script>
-      // Initialize the map
-      var map = L.map("map").setView([50.9981, -118.1957], 13);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "© OpenStreetMap",
-      }).addTo(map);
+      // PDF Map Overlay Upload
+      document.addEventListener("DOMContentLoaded", function () {
+        var pdfForm = document.getElementById("pdf-upload-form");
+        var pdfOverlay;
+        var toggleBtn = document.getElementById("toggle-pdf");
+        var opacitySlider = document.getElementById("pdf-opacity");
+        var opacityLabel = document.getElementById("opacity-label");
+        toggleBtn.onclick = function () {
+          if (pdfOverlay) {
+            if (map.hasLayer(pdfOverlay)) {
+              map.removeLayer(pdfOverlay);
+              toggleBtn.textContent = "Show PDF Overlay";
+              opacityLabel.style.display = "none";
+            } else {
+              map.addLayer(pdfOverlay);
+              toggleBtn.textContent = "Hide PDF Overlay";
+              opacityLabel.style.display = "inline-flex";
+            }
+          }
+        };
+
+        opacitySlider.oninput = function () {
+          if (pdfOverlay) {
+            pdfOverlay.setOpacity(parseFloat(opacitySlider.value));
+          }
+        };
+
+        var pdfControls = document.getElementById("pdf-controls");
+        var nudgeStep = 0.0001; // ~10m, finer adjustment
+        var scaleStep = 0.01; // 1% scaling, finer adjustment
+
+        function updateOverlay(bounds) {
+          if (pdfOverlay) {
+            map.removeLayer(pdfOverlay);
+          }
+          pdfOverlay = L.imageOverlay(pdfOverlay._url, bounds, {
+            opacity: parseFloat(opacitySlider.value),
+          }).addTo(map);
+        }
+
+        function getCurrentBounds() {
+          if (!pdfOverlay) return null;
+          var b = pdfOverlay.getBounds();
+          return [
+            [b.getSouthWest().lat, b.getSouthWest().lng],
+            [b.getNorthEast().lat, b.getNorthEast().lng],
+          ];
+        }
+
+        document.getElementById("nudge-up").onclick = function () {
+          var b = getCurrentBounds();
+          if (!b) return;
+          updateOverlay([
+            [b[0][0] + nudgeStep, b[0][1]],
+            [b[1][0] + nudgeStep, b[1][1]],
+          ]);
+        };
+        document.getElementById("nudge-down").onclick = function () {
+          var b = getCurrentBounds();
+          if (!b) return;
+          updateOverlay([
+            [b[0][0] - nudgeStep, b[0][1]],
+            [b[1][0] - nudgeStep, b[1][1]],
+          ]);
+        };
+        document.getElementById("nudge-left").onclick = function () {
+          var b = getCurrentBounds();
+          if (!b) return;
+          updateOverlay([
+            [b[0][0], b[0][1] - nudgeStep],
+            [b[1][0], b[1][1] - nudgeStep],
+          ]);
+        };
+        document.getElementById("nudge-right").onclick = function () {
+          var b = getCurrentBounds();
+          if (!b) return;
+          updateOverlay([
+            [b[0][0], b[0][1] + nudgeStep],
+            [b[1][0], b[1][1] + nudgeStep],
+          ]);
+        };
+        document.getElementById("scale-up").onclick = function () {
+          var b = getCurrentBounds();
+          if (!b) return;
+          var center = [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2];
+          var latHalf = ((b[1][0] - b[0][0]) / 2) * (1 + scaleStep);
+          var lngHalf = ((b[1][1] - b[0][1]) / 2) * (1 + scaleStep);
+          updateOverlay([
+            [center[0] - latHalf, center[1] - lngHalf],
+            [center[0] + latHalf, center[1] + lngHalf],
+          ]);
+        };
+        document.getElementById("scale-down").onclick = function () {
+          var b = getCurrentBounds();
+          if (!b) return;
+          var center = [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2];
+          var latHalf = ((b[1][0] - b[0][0]) / 2) * (1 - scaleStep);
+          var lngHalf = ((b[1][1] - b[0][1]) / 2) * (1 - scaleStep);
+          updateOverlay([
+            [center[0] - latHalf, center[1] - lngHalf],
+            [center[0] + latHalf, center[1] + lngHalf],
+          ]);
+        };
+
+        pdfForm.onsubmit = async function (e) {
+          e.preventDefault();
+          var fileInput = document.getElementById("pdf-file");
+          var swInput = document.getElementById("sw-coord");
+          var neInput = document.getElementById("ne-coord");
+          if (!fileInput.files.length) {
+            alert("Please select a PDF.");
+            pdfControls.style.display = "inline-flex";
+            return;
+          }
+          var formData = new FormData();
+          formData.append("file", fileInput.files[0]);
+          formData.append("sw_coord", swInput.value);
+          formData.append("ne_coord", neInput.value);
+          let resp = await fetch("/upload-pdf-map", {
+            method: "POST",
+            body: formData,
+          });
+          let data;
+          try {
+            data = await resp.json();
+          } catch (err) {
+            const text = await resp.text();
+            alert(text || "Upload failed");
+            return;
+          }
+          if (
+            !resp.ok &&
+            data &&
+            data.error &&
+            data.error.includes("No geospatial info")
+          ) {
+            // Prompt for manual coordinates if not provided
+            let sw = swInput.value.split(",").map(Number);
+            let ne = neInput.value.split(",").map(Number);
+            if (
+              sw.length !== 2 ||
+              ne.length !== 2 ||
+              sw.some(isNaN) ||
+              ne.some(isNaN)
+            ) {
+              alert(
+                "No geospatial info found in PDF. Please enter SW and NE coordinates as lat,lng."
+              );
+              return;
+            }
+            // Remove previous overlay if exists
+            if (pdfOverlay) map.removeLayer(pdfOverlay);
+            // Add image overlay using manual bounds
+            // The image is still saved as <filename>.png
+            let imgPath = fileInput.files[0].name + ".png";
+            let imageUrl = `/static/pdf_uploads/${imgPath}`;
+            let bounds = [sw, ne];
+            pdfOverlay = L.imageOverlay(imageUrl, bounds, {
+              opacity: parseFloat(opacitySlider.value),
+            }).addTo(map);
+            map.fitBounds(bounds);
+            toggleBtn.style.display = "inline-block";
+            toggleBtn.textContent = "Hide PDF Overlay";
+            opacityLabel.style.display = "inline-flex";
+            return;
+          }
+          if (!resp.ok || data.error) {
+            alert(data.error || "Upload failed");
+            return;
+          }
+          // Remove previous overlay if exists
+          if (pdfOverlay) map.removeLayer(pdfOverlay);
+          // Add image overlay
+          // Ensure correct [lat, lng] order for Leaflet
+          var bounds = [
+            [data.bounds[0], data.bounds[1]], // SW: [lat, lng]
+            [data.bounds[2], data.bounds[3]], // NE: [lat, lng]
+          ];
+          // Defensive: swap if lat < -90 or > 90 (likely swapped)
+          if (Math.abs(bounds[0][0]) > 90 || Math.abs(bounds[1][0]) > 90) {
+            bounds = [
+              [data.bounds[1], data.bounds[0]],
+              [data.bounds[3], data.bounds[2]],
+            ];
+          }
+          pdfOverlay = L.imageOverlay(data.image_url, bounds, {
+            opacity: parseFloat(opacitySlider.value),
+          }).addTo(map);
+          map.fitBounds(bounds);
+          toggleBtn.style.display = "inline-block";
+          toggleBtn.textContent = "Hide PDF Overlay";
+          opacityLabel.style.display = "inline-flex";
+          pdfControls.style.display = "inline-flex";
+        };
+      });
+      // Basemap layers
+      var osm = L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+          maxZoom: 19,
+          attribution: "© OpenStreetMap",
+        }
+      );
+      var satellite = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 19,
+          attribution:
+            "Tiles © Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+        }
+      );
+      var topo = L.tileLayer(
+        "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+        {
+          maxZoom: 17,
+          attribution:
+            "Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)",
+        }
+      );
+      var carto = L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        {
+          maxZoom: 19,
+          attribution:
+            '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+        }
+      );
+
+      // Initialize the map with OSM
+      var map = L.map("map", {
+        center: [50.9981, -118.1957],
+        zoom: 13,
+        layers: [osm],
+      });
+
+      // Basemap control
+      var baseMaps = {
+        OpenStreetMap: osm,
+        Satellite: satellite,
+        Topo: topo,
+        "Carto Light": carto,
+      };
+      L.control
+        .layers(baseMaps, null, { position: "topright", collapsed: false })
+        .addTo(map);
 
       // FeatureGroup to store editable layers
       var drawnItems = new L.FeatureGroup();
@@ -72,7 +351,8 @@
         // Assign a name to the polygon
         if (!window.polygonNameCounter) window.polygonNameCounter = 1;
         layer.feature = layer.feature || { properties: {} };
-        layer.feature.properties.name = 'Polygon ' + window.polygonNameCounter++;
+        layer.feature.properties.name =
+          "Polygon " + window.polygonNameCounter++;
 
         // Add click event for selection and popup
         layer.on("click", function () {
@@ -87,8 +367,14 @@
           // Calculate area using turf.js
           var geojson = layer.toGeoJSON();
           var area = turf.area(geojson);
-          var name = geojson.properties && geojson.properties.name ? geojson.properties.name : 'Polygon';
-          var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(undefined, {maximumFractionDigits:2})} m²`;
+          var name =
+            geojson.properties && geojson.properties.name
+              ? geojson.properties.name
+              : "Polygon";
+          var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(
+            undefined,
+            { maximumFractionDigits: 2 }
+          )} m²`;
           if (layer.getPopup()) {
             layer.setPopupContent(popupContent);
             layer.openPopup();
@@ -115,23 +401,25 @@
       };
       // Divide polygon using backend
       document.getElementById("split-poly").onclick = async function () {
-          if (!window.selectedPolygon) {
-            alert("Please select a polygon to divide.");
-            return;
-          }
-          var selectedGeoJSON = window.selectedPolygon.toGeoJSON();
-          var coords = selectedGeoJSON.geometry.coordinates[0];
-          var nClusters = parseInt(document.getElementById('division-number').value);
-          if (isNaN(nClusters) || nClusters < 1) {
-            alert("Please enter a valid number of divisions.");
-            return;
-          }
-          // Send to backend
-          const response = await fetch("/split-polygon", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ coords: coords, n_clusters: nClusters }),
-          });
+        if (!window.selectedPolygon) {
+          alert("Please select a polygon to divide.");
+          return;
+        }
+        var selectedGeoJSON = window.selectedPolygon.toGeoJSON();
+        var coords = selectedGeoJSON.geometry.coordinates[0];
+        var nClusters = parseInt(
+          document.getElementById("division-number").value
+        );
+        if (isNaN(nClusters) || nClusters < 1) {
+          alert("Please enter a valid number of divisions.");
+          return;
+        }
+        // Send to backend
+        const response = await fetch("/split-polygon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ coords: coords, n_clusters: nClusters }),
+        });
         if (!response.ok) {
           alert("Error from backend");
           return;
@@ -146,7 +434,8 @@
           // Assign a name to the new polygons
           if (!window.polygonNameCounter) window.polygonNameCounter = 1;
           polygonLayer.feature = polygonLayer.feature || { properties: {} };
-          polygonLayer.feature.properties.name = 'Polygon ' + window.polygonNameCounter++;
+          polygonLayer.feature.properties.name =
+            "Polygon " + window.polygonNameCounter++;
           // Add click event for selection and popup
           polygonLayer.on("click", function () {
             drawnItems.eachLayer(function (l) {
@@ -157,8 +446,14 @@
             window.selectedPolygon = polygonLayer;
             var geojson = polygonLayer.toGeoJSON();
             var area = turf.area(geojson);
-            var name = geojson.properties && geojson.properties.name ? geojson.properties.name : 'Polygon';
-            var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(undefined, {maximumFractionDigits:2})} m²`;
+            var name =
+              geojson.properties && geojson.properties.name
+                ? geojson.properties.name
+                : "Polygon";
+            var popupContent = `<b>${name}</b><br>Area: ${area.toLocaleString(
+              undefined,
+              { maximumFractionDigits: 2 }
+            )} m²`;
             if (polygonLayer.getPopup()) {
               polygonLayer.setPopupContent(popupContent);
               polygonLayer.openPopup();
