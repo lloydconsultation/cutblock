@@ -10,13 +10,119 @@
       href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"
     />
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=debug1" />
   </head>
   <body>
     <div id="map"></div>
-    <div class="controls" style="flex-wrap: wrap; gap: 18px">
-      <div style="display: flex; align-items: center; gap: 8px">
-        <button id="download" style="min-width: 120px">Download GeoJSON</button>
+    <div id="loading-overlay" class="loading-overlay" aria-hidden="true">
+      <div class="loading-dialog" role="status" aria-live="polite">
+        <div class="loading-spinner"></div>
+        <div id="loading-text" class="loading-text">Working…</div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="controls-row">
+        <form id="pdf-upload-form" class="controls-chip">
+          <input
+            type="file"
+            id="pdf-file"
+            accept="application/pdf"
+            style="width: 180px"
+          />
+          <button type="button" id="inspect-pdf" style="min-width: 120px">
+            Check Metadata
+          </button>
+          <input
+            type="text"
+            id="sw-coord"
+            placeholder="SW lat,lng (optional)"
+            size="12"
+            style="width: 110px; padding: 4px 6px"
+          />
+          <input
+            type="text"
+            id="ne-coord"
+            placeholder="NE lat,lng (optional)"
+            size="12"
+            style="width: 110px; padding: 4px 6px"
+          />
+          <input
+            type="text"
+            id="center-coord"
+            placeholder="Center lat,lng"
+            size="12"
+            style="width: 120px; padding: 4px 6px"
+          />
+
+          <button type="submit" style="min-width: 120px">Upload PDF Map</button>
+        </form>
+      </div>
+
+      <div class="controls-row">
+        <button id="toggle-pdf" type="button" style="min-width: 130px">
+          Toggle PDF Overlay
+        </button>
+        <label id="opacity-label" style="margin-bottom: 0">
+          PDF Opacity
+          <input
+            type="range"
+            id="pdf-opacity"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+            style="vertical-align: middle; width: 80px"
+          />
+        </label>
+
+        <div id="pdf-controls" class="controls-chip">
+          <span style="font-size: 13px; color: #444">Move:</span>
+          <button type="button" id="nudge-up" style="width: 28px; height: 28px">
+            ▲
+          </button>
+          <button
+            type="button"
+            id="nudge-down"
+            style="width: 28px; height: 28px"
+          >
+            ▼
+          </button>
+          <button
+            type="button"
+            id="nudge-left"
+            style="width: 28px; height: 28px"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            id="nudge-right"
+            style="width: 28px; height: 28px"
+          >
+            ▶
+          </button>
+          <span style="font-size: 13px; color: #444; margin-left: 8px"
+            >Scale:</span
+          >
+          <button type="button" id="scale-up" style="width: 28px; height: 28px">
+            ＋
+          </button>
+          <button
+            type="button"
+            id="scale-down"
+            style="width: 28px; height: 28px"
+          >
+            －
+          </button>
+        </div>
+      </div>
+
+      <div class="controls-row">
+        <select id="download-format" style="padding: 4px 8px">
+          <option value="kml" selected>KML</option>
+          <option value="geojson">GeoJSON</option>
+        </select>
+        <button id="download" style="min-width: 120px">Download</button>
         <input
           placeholder="How many parts?"
           id="division-number"
@@ -29,126 +135,13 @@
           <option value="radial">Radial</option>
         </select>
         <button id="split-poly" style="min-width: 150px">Divide Polygon</button>
-        <button
-          id="revert-poly"
-          style="
-            min-width: 120px;
-            background: #eee;
-            color: #333;
-            border: 1px solid #bbb;
-          "
-        >
+        <button id="revert-poly" style="min-width: 120px">
           Revert Division
         </button>
       </div>
-      <div style="display: flex; align-items: center; gap: 8px">
-        <button
-          id="toggle-pdf"
-          type="button"
-          style="display: none; min-width: 130px"
-        >
-          Toggle PDF Overlay
-        </button>
-        <label
-          id="opacity-label"
-          style="display: none; align-items: center; gap: 4px; margin-bottom: 0"
-        >
-          PDF Opacity
-          <input
-            type="range"
-            id="pdf-opacity"
-            min="0"
-            max="1"
-            step="0.01"
-            value="1"
-            style="vertical-align: middle; width: 80px"
-          />
-        </label>
-      </div>
-      <div
-        id="pdf-controls"
-        style="
-          display: none;
-          align-items: center;
-          gap: 6px;
-          background: #f7f7f7;
-          border-radius: 6px;
-          padding: 4px 10px;
-        "
-      >
-        <span style="font-size: 13px; color: #444">Move:</span>
-        <button type="button" id="nudge-up" style="width: 28px; height: 28px">
-          ▲
-        </button>
-        <button type="button" id="nudge-down" style="width: 28px; height: 28px">
-          ▼
-        </button>
-        <button type="button" id="nudge-left" style="width: 28px; height: 28px">
-          ◀
-        </button>
-        <button
-          type="button"
-          id="nudge-right"
-          style="width: 28px; height: 28px"
-        >
-          ▶
-        </button>
-        <span style="font-size: 13px; color: #444; margin-left: 8px"
-          >Scale:</span
-        >
-        <button type="button" id="scale-up" style="width: 28px; height: 28px">
-          ＋
-        </button>
-        <button type="button" id="scale-down" style="width: 28px; height: 28px">
-          －
-        </button>
-      </div>
-      <form
-        id="pdf-upload-form"
-        style="
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: #f7f7f7;
-          border-radius: 6px;
-          padding: 4px 10px;
-        "
-      >
-        <input
-          type="file"
-          id="pdf-file"
-          accept="application/pdf"
-          style="width: 140px"
-        />
-        <input
-          type="text"
-          id="sw-coord"
-          placeholder="SW lat,lng (optional)"
-          size="12"
-          style="width: 110px; padding: 4px 6px"
-        />
-        <input
-          type="text"
-          id="ne-coord"
-          placeholder="NE lat,lng (optional)"
-          size="12"
-          style="width: 110px; padding: 4px 6px"
-        />
-        <input
-          type="text"
-          id="center-coord"
-          placeholder="Center lat,lng"
-          size="12"
-          style="width: 120px; padding: 4px 6px"
-        />
-        <button type="button" id="inspect-pdf" style="min-width: 120px">
-          Check Metadata
-        </button>
-        <button type="submit" style="min-width: 120px">Upload PDF Map</button>
-      </form>
     </div>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=debug1"></script>
   </body>
 </html>
