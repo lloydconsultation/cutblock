@@ -1,0 +1,40 @@
+Next steps: Fix misshaped / misaligned PDF overlay
+
+1) Re-upload and compare
+- Upload the same GeoPDF twice: once using auto georef, once using manual SW/NE.
+- If auto looks rotated/skewed vs the basemap but manual looks better, the PDF likely has rotation/shear (Leaflet image overlays are axis-aligned).
+
+2) Prefer a warped / north-up raster
+- If you have a backend-produced warped WGS84 north-up PNG (e.g., PUR076_testwarp.png), use that for the overlay.
+- Warping removes rotation/shear so an axis-aligned overlay can line up correctly.
+
+3) Verify Poppler is installed (pdf2image dependency)
+- pdf2image requires Poppler’s `pdftoppm` at runtime.
+- Check: `pdftoppm -v`
+- If missing on macOS: `brew install poppler`
+
+4) Confirm bounds are WGS84 (EPSG:4326)
+- The browser expects lat/lon bounds.
+- If the PDF is in a projected CRS (Albers/UTM/etc.), ensure any extracted bounds are transformed to WGS84 before use.
+
+5) Watch for axis-order flips
+- Some GDAL/PROJ configurations can swap axis order (lat/lon vs lon/lat).
+- Symptom: mirrored map or wildly offset placement.
+- Sanity check for your area: lon ~ -121, lat ~ 54.
+
+6) Check for rotation/shear in the PDF georeferencing
+- If the geotransform has non-zero rotation/shear terms (often `gt[2]` and `gt[4]`), an axis-aligned overlay will distort unless you warp first.
+
+7) Rule out resolution/DPI issues
+- Very low DPI rasterization can look “off” when zooming.
+- If the overlay is soft or the perceived offset changes with zoom, try generating a higher DPI / larger PNG and re-check.
+
+8) Align using known points
+- Pick 2–3 obvious control points (road intersections, stream junctions).
+- If error grows across the page (good in one corner, bad elsewhere) → rotation/shear → warping needed.
+- If the error is a constant shift everywhere → bounds/origin offset → manual SW/NE or nudging fixes it.
+
+9) Avenza comparison test
+- Export a simple test polygon (small square around a landmark) and load into Avenza.
+- If it’s consistently shifted by the same amount/direction → adjust placement/bounds.
+- If it’s distorted (fits in one area but not another) → rotation/shear issue → use warped PNG workflow.
